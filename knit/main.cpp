@@ -255,6 +255,8 @@ void run() {
 
 		generation++;
 	}
+	fitness = populations[generation % 2].calculateFitness(kernel, canvas, nailPoints);
+	printf("Generation: %i,\tFitness: %lf\n", generation, fitness);
 
 	Genome *win = &(populations[generation % 2].population.back());
 	win->draw(canvas, nailPoints);
