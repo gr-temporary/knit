@@ -203,7 +203,7 @@ void run() {
 	int genomeSize = nails * 4;
 	int imageSize = 100;
 
-	char *filename = "kernel.png";
+	char *filename = "test.png";
 
 	CImg<unsigned char> file(filename);
 	Image kernel(imageSize, imageSize, 1, 1, 0.0f);
@@ -256,9 +256,10 @@ void run() {
 		generation++;
 	}
 
-	int fin = generation % 2;
-	populations[fin].population.back().draw(canvas, nailPoints);
-
+	Genome *win = &(populations[generation % 2].population.back());
+	win->draw(canvas, nailPoints);
+	canvas.normalize(0, 255);
+	canvas.display();
 }
 
 int main(int argc, char **argv) {
@@ -267,7 +268,7 @@ int main(int argc, char **argv) {
 		printf("%i\n", (int)floor(normalRandom() * 2 + 0.5));
 	}*/
 
-
+	run();
 
 	char c;
 	scanf_s("%c", &c);
