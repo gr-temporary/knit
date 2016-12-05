@@ -120,6 +120,7 @@ struct Population {
 		double average = 0.0;
 
 		for (int i = 0; i < population.size(); i++) {
+			printf("%i\n", i);
 			population[i].draw(canvas, nails);
 			double fitness = 0.0;
 			for (int x = 0; x < kernel.width(); x++) {
