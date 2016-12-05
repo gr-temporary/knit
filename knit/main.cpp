@@ -77,8 +77,8 @@ struct Genome {
 		canvas.fill(0.0f);
 		for (int i = 0; i < dna.size() - 1; i++) {
 			int x0 = nails[dna[i]].first;
-			int x1 = nails[dna[i + 1]].second;
-			int y0 = nails[dna[i]].first;
+			int x1 = nails[dna[i + 1]].first;
+			int y0 = nails[dna[i]].second;
 			int y1 = nails[dna[i + 1]].second;
 			int dx = cimg::abs(x1 - x0);
 			int dy = cimg::abs(y1 - y0);
@@ -94,6 +94,8 @@ struct Genome {
 				if (e2 < dx) { err += dx; y0 += sy; }
 			}
 		}
+		//canvas.normalize(0, 255);
+		//canvas.display();
 	}
 
 	bool operator <(const Genome &g) {
@@ -120,7 +122,7 @@ struct Population {
 		double average = 0.0;
 
 		for (int i = 0; i < population.size(); i++) {
-			printf("%i\n", i);
+			//printf("%i\n", i);
 			population[i].draw(canvas, nails);
 			double fitness = 0.0;
 			for (int x = 0; x < kernel.width(); x++) {
@@ -245,7 +247,7 @@ void run() {
 	double fitness;// = population.calculateFitness(kernel, canvas, nailPoints);
 	int generation = 0;
 	
-	while (generation < 10) {
+	while (generation < 100) {
 		int current = generation % 2;
 		int next = (generation + 1) % 2;
 		fitness = populations[current].calculateFitness(kernel, canvas, nailPoints);
