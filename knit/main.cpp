@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <time.h>
+#include <string.h>
 #include "CImg.h"
 
 using namespace cimg_library;
@@ -27,6 +28,53 @@ double normalRandom()
 	double u1 = uniformRandom();
 	double u2 = uniformRandom();
 	return cos(8.*atan(1.)*u2)*sqrt(-2.*log(u1));
+}
+
+bool inCircle(int x, int y, int r) {
+	int dx = x - r;
+	int dy = y - r;
+	return (dx * 2 + 1) * (dx * 2 + 1) + (dy * 2 + 1) * (dy * 2 + 1) <= (r * 2 + 1) * (r * 2 + 1);
+}
+
+float normalizeImage(Image &canvas) {
+	float mean = 0.0;
+	int c = 0;
+	int r = canvas.width() / 2;
+	for (int i = 0; i < canvas.width(); i++) {
+		for (int j = 0; j < canvas.height(); j++) {
+			if (inCircle(i, j, r)) {
+				mean += canvas(i, j, 0, 0);
+				c++;
+			}
+		}
+	}
+	mean /= c;
+	float dev = 0.0;
+	for (int i = 0; i < canvas.width(); i++) {
+		for (int j = 0; j < canvas.height(); j++) {
+			if (inCircle(i, j, r)) {
+				float d = canvas(i, j, 0, 0) - mean;
+				dev += pow(d, 2);
+				canvas(i, j, 0, 0) = d;
+			}
+		}
+	}
+	dev = sqrt(dev);
+	for (int i = 0; i < canvas.width(); i++) {
+		for (int j = 0; j < canvas.height(); j++) {
+			if (inCircle(i, j, r)) {
+				canvas(i, j, 0, 0) /= dev;
+			}
+		}
+	}
+	for (int i = 0; i < canvas.width(); i++) {
+		for (int j = 0; j < canvas.height(); j++) {
+			if (!inCircle(i, j, r)) {
+				canvas(i, j, 0, 0) = 0.0;
+			}
+		}
+	}
+	return dev;
 }
 
 struct Genome {
@@ -53,7 +101,7 @@ struct Genome {
 		}
 	}
 
-	void draw(Image &canvas, const std::vector<Point> &nails, const float threadOpacity) {
+	void draw(Image &canvas, const std::vector<Point> &nails, const float threadOpacity, const std::vector<Point> &bounds) {
 		canvas.fill(0.0f);
 		for (int i = 0; i < dna.size() - 1; i++) {
 			int x0 = nails[dna[i]].first;
@@ -77,8 +125,7 @@ struct Genome {
 				if (e2 < dx) { err += dx; y0 += sy; }
 			}
 		}
-		//canvas.normalize(0.0, 1.0);
-		//canvas.display();
+		normalizeImage(canvas);
 	}
 
 	// ORDER BY fitness DESC
@@ -88,6 +135,21 @@ struct Genome {
 };
 
 typedef std::vector<Genome> Genomes;
+
+double convolve(const Image &kernel, const Image &canvas) {
+	double result = 0.0;
+	double n = 0;
+	int r = canvas.width() / 2;
+	for (int i = 0; i < canvas.width(); i++) {
+		for (int j = 0; j < canvas.height(); j++) {
+			if (inCircle(i, j, r)) {
+				result += kernel(i, j, 0, 0) * canvas(i, j, 0, 0);
+				n++;
+			}
+		}
+	}
+	return result;
+}
 
 struct Population {
 	Genomes population;
@@ -100,24 +162,15 @@ struct Population {
 		}
 	}
 
-	double calculateFitness(const Image &kernel, Image &canvas, const std::vector<Point> &nails, const float threadOpacity) {
+	double calculateFitness(const Image &kernel, Image &canvas, const std::vector<Point> &nails, const float threadOpacity, const std::vector<Point> &bounds) {
 		double minFitness = 10e+7;
 		double maxFitness = -10e+7;
 		double average = 0.0;
 
 		for (int i = 0; i < population.size(); i++) {
 			//printf("%i\n", i);
-			population[i].draw(canvas, nails, threadOpacity);
-			double fitness = 0.0;
-			double error = 0.0;
-			for (int x = 0; x < kernel.width(); x++) {
-				for (int y = 0; y < kernel.height(); y++) {
-					//fitness += kernel(x, y) * canvas(x, y);
-					fitness += (kernel(x, y, 0, 0) - 0.5) * (canvas(x, y, 0, 0) - 0.5);
-					//error += pow(kernel(x, y, 0, 0) - canvas(x, y, 0, 0), 2);
-				}
-			}
-			//fitness = 100.0 / (error + 1);
+			population[i].draw(canvas, nails, threadOpacity, bounds);
+			double fitness = convolve(kernel, canvas);
 			population[i].fitness = fitness;
 			if (fitness > maxFitness) maxFitness = fitness;
 			if (fitness < minFitness) minFitness = fitness;
@@ -131,25 +184,31 @@ struct Population {
 			population[i].weight = weightSum;
 			weightSum += weight;
 		}
-
-		//printf("Max: %.2lf\tMin: %.2lf\n", maxFitness, minFitness);
-
+		
 		return average / population.size();
 	}
 
 	Genome* getParent() {
-		double random = uniformRandom() * weightSum;
+		double random = uniformRandom() * weightSum / 2; // only first (successful) part, because fuck you
 		int i;
-		for (i = 0; i < population.size() - 1; i++) {
+		for (i = population.size() - 1; i > 0; i--) {
 			if (random > population[i].weight)
 				break;
 		}
+		//printf("Parent: %i (%lf)\n", i, population[i].fitness);
+		return &(population[i]);
+	}
+
+	Genome* getParentOrdinal() {
+		double random = pow(uniformRandom(), 2) * population.size() / 2;
+		int i = floor(random);
+		//printf("%i ", i);
 		return &(population[i]);
 	}
 };
 
 int getCrossoverJumpSize(int size) {
-	return floor(uniformRandom() * size / 5 + size / 5);
+	return floor(uniformRandom() * size / 2 + size / 3);
 }
 
 Genome crossover(Genome *mother, Genome *father) {
@@ -179,47 +238,97 @@ Genome crossover(Genome *mother, Genome *father) {
 void generateNewPopulation(Population &base, Population &result, int nails) {
 	for (int i = 0; i < result.population.size(); i++) {
 		// select 2 parents
-		Genome* mother = base.getParent();
-		Genome* father = base.getParent();
+		Genome* mother = base.getParentOrdinal();
+		Genome* father = base.getParentOrdinal();
 
 		// crossover
 		result.population[i] = crossover(mother, father);
 
 		// mutate
-		result.population[i].mutate(2.0, nails);
+		result.population[i].mutate(1.5, nails);
 	}
 }
 
-void run() {
-	int nails = 150;
-	int populationSize = 200;
-	int genomeSize = nails * 4;
-	int imageSize = 100;
-	float threadOpacity = 1.0 / 10;
+Image loadImage(char *filename, int imageSize) {
+	Image result(imageSize, imageSize, 1, 1, 0.0);
+	CImg<unsigned char> image(filename);
 
-	char *filename = "stripes.png";
-
-	CImg<unsigned char> file(filename);
-	Image kernel(imageSize, imageSize, 1, 1, 0.0f);
-
-	file.resize(imageSize, imageSize);
+	image.resize(imageSize, imageSize);
 
 	for (int i = 0; i < imageSize; i++) {
 		for (int j = 0; j < imageSize; j++) {
-			double c = 0.299 * file(i, j, 0, 0) + 0.587 * file(i, j, 0, 1) + 0.114 * file(i, j, 0, 2);
-			//c = 1.0 - c / 255.0;
-			c = 1.0 - c / 128.0;
-			kernel(i, j, 0, 0) = c;
+			double c = image(i, j, 0, 0);
+			c = 1.0 - c / 255.0;
+			result(i, j, 0, 0) = c;
 
-			int dx = i - imageSize / 2;
-			int dy = j - imageSize / 2;
-			if (dx * dx + dy * dy >= (imageSize * imageSize / 4) * 0.8) {
-				kernel(i, j, 0, 0) = 0.0;
+			// can't harm
+			if (!inCircle(i, j, imageSize / 2)) {
+				result(i, j, 0, 0) = 0.0;
 			}
 		}
 	}
 
-	Image canvas(imageSize, imageSize, 1, 1, 0.0f);
+	return result;
+}
+
+void drawHistory(std::vector<double> history) {
+	Image img(history.size(), 200, 1, 1, 0.0);
+	std::vector<double>::iterator max = std::max_element(history.begin(), history.end());
+	std::vector<double>::iterator min = std::min_element(history.begin(), history.end());
+	
+}
+
+void run() {
+	int nails = 150;
+	int populationSize = 100;
+	int genomeSize = nails * 4;
+	int imageSize = 100;
+	int iterations = 50;
+	int stableIterations = 5;
+	float threadOpacity = 1.0 / 10;
+	double threshold = 1e-7;
+	char filename[256] = "test-i.png";
+
+	FILE *config = NULL;
+	fopen_s(&config, "config.txt", "r");
+	
+	char line[256];
+	while (fscanf_s(config, "%s", line, 256) != EOF) {
+		if (strcmp(line, "file") == 0) {
+			//strcpy_s(filename, line);
+			fscanf_s(config, "%s", filename, 256);
+		} else
+		if (strcmp(line, "nails") == 0) {
+			fscanf_s(config, "%i", &nails);
+		} else
+		if (strcmp(line, "populationsize") == 0) {
+			fscanf_s(config, "%i", &populationSize);
+		} else
+		if (strcmp(line, "genomesize") == 0) {
+			fscanf_s(config, "%i", &genomeSize);
+		} else
+		if (strcmp(line, "imagesize") == 0) {
+			fscanf_s(config, "%i", &imageSize);
+		} else
+		if (strcmp(line, "iterations") == 0) {
+			fscanf_s(config, "%i", &iterations);
+		}
+		if (strcmp(line, "stableiterations") == 0) {
+			fscanf_s(config, "%i", &stableIterations);
+		}
+		else
+		if (strcmp(line, "threshold") == 0) {
+			fscanf_s(config, "%f", &threshold);
+		}
+		else
+		if (strcmp(line, "opacity") == 0) {
+			fscanf_s(config, "%f", &threadOpacity);
+		} else {
+			
+		}
+	}
+
+	fclose(config);
 
 	std::vector<Point> nailPoints;
 	nailPoints.resize(nails);
@@ -227,45 +336,75 @@ void run() {
 		double a = 3.14159265359 * 2 * i / nails;
 		double s = std::sin(a);
 		double c = std::cos(a);
-		double r = imageSize / 2;
-		nailPoints[i].first = floor(r + c * r);
-		nailPoints[i].second = floor(r + s * r);
+		double r = imageSize / 2 - 1;
+		nailPoints[i].first = floor(imageSize / 2 + c * r);
+		nailPoints[i].second = floor(imageSize / 2 + s * r);
+	}
+	std::vector<Point> bounds;
+	bounds.resize(imageSize);
+	for (int i = 0; i < imageSize; i++) {
+		double hw = imageSize / 2 - 0.5;
+		int off = sqrt(hw * hw - pow(i - hw, 2));
+		bounds[i].first = floor(imageSize / 2 - off);
+		bounds[i].second = floor(imageSize / 2 + off);
 	}
 
 	Population populations[2];
 	populations[0].init(populationSize, genomeSize, nails);
 	populations[1].init(populationSize, genomeSize, nails);
 
-	double fitness;// = population.calculateFitness(kernel, canvas, nailPoints);
+	Image kernel = loadImage(filename, imageSize);
+	Image canvas(imageSize, imageSize, 1, 1, 0.0f);
+
+	normalizeImage(kernel);
+
+	double fitness = 0.0;
+	double prevFitness = 1.0;
+	int stableGeneration = 0;
 	int generation = 0;
+	bool enough = false;
+	std::vector<double> history;
+	history.reserve(iterations);
 	
-	while (generation < 2020) {
+	while (!enough && generation < iterations) {
 		int current = generation % 2;
 		int next = (generation + 1) % 2;
-		fitness = populations[current].calculateFitness(kernel, canvas, nailPoints, threadOpacity);
 
+		prevFitness = fitness;
+		fitness = populations[current].calculateFitness(kernel, canvas, nailPoints, threadOpacity, bounds);
+
+		history.push_back(fitness);
 		printf("Generation: %i,\tFitness: %.7lf,\tMax: %.7lf\tMin: %.7lf\n", generation, fitness, populations[current].population.front().fitness, populations[current].population.back().fitness);
 
 		generateNewPopulation(populations[current], populations[next], nails);
 
+		if (abs(1.0 - fitness / prevFitness) < threshold) {
+			stableGeneration++;
+		}
+		else {
+			stableGeneration = 0;
+		}
+		if (stableGeneration >= stableIterations) {
+			enough = true;
+		}
 		generation++;
 	}
-	fitness = populations[generation % 2].calculateFitness(kernel, canvas, nailPoints, threadOpacity);
+	fitness = populations[generation % 2].calculateFitness(kernel, canvas, nailPoints, threadOpacity, bounds);
 	printf("Generation: %i,\tFitness: %lf\n", generation, fitness);
 
 	Genome *win = &(populations[generation % 2].population.front());
-	win->draw(canvas, nailPoints, threadOpacity);
+	win->draw(canvas, nailPoints, threadOpacity, bounds);
 	canvas.normalize(0, 255);
 	canvas *= -1;
 	canvas += 255;
-	canvas.display("Lowest");
+	canvas.display("Winner");
 
 	win = &(populations[generation % 2].population.back());
-	win->draw(canvas, nailPoints, threadOpacity);
+	win->draw(canvas, nailPoints, threadOpacity, bounds);
 	canvas.normalize(0, 255);
 	canvas *= -1;
 	canvas += 255;
-	canvas.display("Highest");
+	canvas.display("Not winner");
 }
 
 int main(int argc, char **argv) {
@@ -274,8 +413,24 @@ int main(int argc, char **argv) {
 		printf("%i\n", (int)floor(normalRandom() * 2 + 0.5));
 	}*/
 
+	/*Image test1 = loadImage("stripes.png", 100);
+	Image test2(100, 100, 1, 1, 0.0);
+	for (int i = 0; i < 100 - 3; i++) {
+		for (int j = 0; j < 100; j++) {
+			test2(i, j, 0, 0) = test1(i + 3, j, 0, 0);
+		}
+	}
+	normalizeImage(test1);
+	normalizeImage(test2);
+	test1.display();
+	test2.display();
+	double r = convolve(test1, test2);
+	printf("%lf", r);
+	test1 -= test2;
+	test1.display();*/
+
 	run();
 
 	char c;
-	scanf_s("%c", &c);
+	//scanf_s("%c", &c);
 }

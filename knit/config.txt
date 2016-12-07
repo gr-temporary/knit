@@ -1,0 +1,13 @@
+#file test-i.png
+#file circle.png
+#file stripes.png
+#file dot.png
+file half.png
+nails 100
+imagesize 100
+populationsize 100
+genomesize 600
+opacity 0.05
+iterations 300
+stableiterations 10
+threshold 0.03
