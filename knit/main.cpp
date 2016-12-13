@@ -101,6 +101,15 @@ struct Genome {
 		}
 	}
 
+	void burst(float probability, int nails) {
+		for (int i = 0; i < dna.size(); i++) {
+			if (uniformRandom() < probability) {
+				int offset = floor(uniformRandom() * nails);
+				dna[i] = offset;
+			}
+		}
+	}
+
 	void draw(Image &canvas, const std::vector<Point> &nails, const float threadOpacity, const std::vector<Point> &bounds) {
 		canvas.fill(0.0f);
 		for (int i = 0; i < dna.size() - 1; i++) {
@@ -205,10 +214,17 @@ struct Population {
 		//printf("%i ", i);
 		return &(population[i]);
 	}
+
+	void burst(float probability, int nails) {
+		for (int i = 0; i < population.size(); i++) {
+			population[i].burst(probability, nails);
+		}
+	}
 };
 
+int MAX_CHUNK, MIN_CHUNK;
 int getCrossoverJumpSize(int size) {
-	return floor(uniformRandom() * size / 2 + size / 3);
+	return floor(uniformRandom() * (MAX_CHUNK - MIN_CHUNK) + MIN_CHUNK);
 }
 
 Genome crossover(Genome *mother, Genome *father) {
@@ -235,8 +251,11 @@ Genome crossover(Genome *mother, Genome *father) {
 	return child;
 }
 
-void generateNewPopulation(Population &base, Population &result, int nails) {
-	for (int i = 0; i < result.population.size(); i++) {
+void generateNewPopulation(Population &base, Population &result, int nails, int elite, float mutationSpread) {
+	for (int i = 0; i < elite && i < result.population.size(); i++) {
+		result.population[i] = base.population[i];
+	}
+	for (int i = elite; i < result.population.size(); i++) {
 		// select 2 parents
 		Genome* mother = base.getParentOrdinal();
 		Genome* father = base.getParentOrdinal();
@@ -245,7 +264,7 @@ void generateNewPopulation(Population &base, Population &result, int nails) {
 		result.population[i] = crossover(mother, father);
 
 		// mutate
-		result.population[i].mutate(1.5, nails);
+		result.population[i].mutate(mutationSpread, nails);
 	}
 }
 
@@ -271,22 +290,48 @@ Image loadImage(char *filename, int imageSize) {
 	return result;
 }
 
-void drawHistory(std::vector<double> history) {
-	Image img(history.size(), 200, 1, 1, 0.0);
+void drawHistory(std::vector<double> &history) {
+	int height = 200;
+	int width = history.size();
+	while (width > 1000) {
+		width /= 2;
+	}
+	Image img(width, height, 1, 1, 0.0);
 	std::vector<double>::iterator max = std::max_element(history.begin(), history.end());
 	std::vector<double>::iterator min = std::min_element(history.begin(), history.end());
-	
+	double scale = *max - *min;
+	for (int i = 0; i < history.size(); i++) {
+		int h = floor(history[i] * height * 0.4);
+		if (h >= 0) {
+			for (int j = 0; j < h; j++) {
+				img(i * width / history.size(), height / 2 - j - 1, 0, 0) = 1.0;
+			}
+		} else {
+			for (int j = 0; j > h; j--) {
+				img(i * width / history.size(), height / 2 - j - 1, 0, 0) = 0.5;
+			}
+		}
+	}
+	img.display();
 }
 
 void run() {
 	int nails = 150;
 	int populationSize = 100;
+	int elite = 0;
 	int genomeSize = nails * 4;
 	int imageSize = 100;
+	int minChunk = 10;
+	int maxChunk = 20;
 	int iterations = 50;
 	int stableIterations = 5;
+	int iterationsToBurst = 100;
 	float threadOpacity = 1.0 / 10;
+	float mutationSpread = 1.0;
+	float burstProbability = 0.005;
 	double threshold = 1e-7;
+	double ringDiameter = 0;
+	double threadDiameter = 0;
 	char filename[256] = "test-i.png";
 
 	FILE *config = NULL;
@@ -304,8 +349,19 @@ void run() {
 		if (strcmp(line, "populationsize") == 0) {
 			fscanf_s(config, "%i", &populationSize);
 		} else
+		if (strcmp(line, "elite") == 0) {
+			fscanf_s(config, "%i", &elite);
+		} else
 		if (strcmp(line, "genomesize") == 0) {
 			fscanf_s(config, "%i", &genomeSize);
+		} else
+		if (strcmp(line, "minchunk") == 0) {
+			fscanf_s(config, "%i", &minChunk);
+			MIN_CHUNK = minChunk;
+		} else
+		if (strcmp(line, "maxChunk") == 0) {
+			fscanf_s(config, "%i", &maxChunk);
+			MAX_CHUNK = maxChunk;
 		} else
 		if (strcmp(line, "imagesize") == 0) {
 			fscanf_s(config, "%i", &imageSize);
@@ -313,22 +369,41 @@ void run() {
 		if (strcmp(line, "iterations") == 0) {
 			fscanf_s(config, "%i", &iterations);
 		}
-		if (strcmp(line, "stableiterations") == 0) {
-			fscanf_s(config, "%i", &stableIterations);
+		if (strcmp(line, "mutation") == 0) {
+			fscanf_s(config, "%f", &mutationSpread);
 		}
 		else
+		if (strcmp(line, "stableiterations") == 0) {
+			fscanf_s(config, "%i", &stableIterations);
+		} else
+		if (strcmp(line, "goodgenerations") == 0) {
+			fscanf_s(config, "%i", &iterationsToBurst);
+		} else
 		if (strcmp(line, "threshold") == 0) {
 			fscanf_s(config, "%f", &threshold);
 		}
 		else
 		if (strcmp(line, "opacity") == 0) {
 			fscanf_s(config, "%f", &threadOpacity);
+		} else
+		if (strcmp(line, "burst") == 0) {
+			fscanf_s(config, "%f", &burstProbability);
+		}
+		if (strcmp(line, "ring_diameter") == 0) {
+			fscanf_s(config, "%lf", &ringDiameter);
+		} else
+		if (strcmp(line, "thread_diameter") == 0) {
+			fscanf_s(config, "%lf", &threadDiameter);
 		} else {
 			
 		}
 	}
 
 	fclose(config);
+
+	if (abs(ringDiameter) > 1e-7 && abs(threadDiameter) > 1e-7) {
+		threadOpacity = ringDiameter * threadDiameter / imageSize;
+	}
 
 	std::vector<Point> nailPoints;
 	nailPoints.resize(nails);
@@ -360,7 +435,10 @@ void run() {
 
 	double fitness = 0.0;
 	double prevFitness = 1.0;
+	double best = 1.0;
+	double prevBest = 1.0;
 	int stableGeneration = 0;
+	int goodGeneration = 0;
 	int generation = 0;
 	bool enough = false;
 	std::vector<double> history;
@@ -373,15 +451,29 @@ void run() {
 		prevFitness = fitness;
 		fitness = populations[current].calculateFitness(kernel, canvas, nailPoints, threadOpacity, bounds);
 
+		prevBest = best;
+		best = populations[current].population.front().fitness;
+
 		history.push_back(fitness);
 		printf("Generation: %i,\tFitness: %.7lf,\tMax: %.7lf\tMin: %.7lf\n", generation, fitness, populations[current].population.front().fitness, populations[current].population.back().fitness);
 
-		generateNewPopulation(populations[current], populations[next], nails);
+		generateNewPopulation(populations[current], populations[next], nails, elite, mutationSpread);
+
+		if (abs(1.0 - best / prevBest) < 1e-7) {
+			goodGeneration++;
+		} else {
+			goodGeneration = 0;
+		}
+
+		if (goodGeneration > iterationsToBurst) {
+			goodGeneration = 0;
+			populations[next].burst(burstProbability, nails);
+			printf("BUSRT!\n");
+		}
 
 		if (abs(1.0 - fitness / prevFitness) < threshold) {
 			stableGeneration++;
-		}
-		else {
+		} else {
 			stableGeneration = 0;
 		}
 		if (stableGeneration >= stableIterations) {
@@ -397,14 +489,12 @@ void run() {
 	canvas.normalize(0, 255);
 	canvas *= -1;
 	canvas += 255;
+
+	canvas.save("result.bmp");
+
 	canvas.display("Winner");
 
-	win = &(populations[generation % 2].population.back());
-	win->draw(canvas, nailPoints, threadOpacity, bounds);
-	canvas.normalize(0, 255);
-	canvas *= -1;
-	canvas += 255;
-	canvas.display("Not winner");
+	//drawHistory(history);
 }
 
 int main(int argc, char **argv) {

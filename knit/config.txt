@@ -1,13 +1,22 @@
 #file test-i.png
 #file circle.png
-#file stripes.png
+file stripes.png
 #file dot.png
-file half.png
+#file half.png
 nails 100
-imagesize 100
+imagesize 150
 populationsize 100
+elite 20
 genomesize 600
 opacity 0.05
-iterations 300
+mutation 0.2
+minchunk 100
+maxchunk 200 
+iterations 6000
 stableiterations 10
+goodgenerations 100
+burst 0.001
 threshold 0.03
+#
+ring_diameter 200
+thread_diameter 0.05 
