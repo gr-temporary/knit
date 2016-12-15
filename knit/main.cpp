@@ -30,6 +30,128 @@ double normalRandom()
 	return cos(8.*atan(1.)*u2)*sqrt(-2.*log(u1));
 }
 
+struct Slab {
+	double *data;
+
+	Slab() {
+		data = new double[width * width];
+		fill(0.0);
+	}
+
+	void fill(double v = 0.0) {
+		for (int i = 0; i < size; i++) {
+			data[i] = v;
+		}
+	}
+
+	void fromImage(const Image &image) {
+		for (int i = 0; i < image.width(); i++) {
+			for (int j = 0; j < image.height(); j++) {
+				if (i >= bounds[j].first && i <= bounds[j].second) {
+					data[i + j * width] = image(i, j, 0, 0);
+				}
+			}
+		}
+	}
+
+	void toImage(Image &image) {
+		image.fill(0.0);
+		for (int i = 0; i < width; i++) {
+			for (int j = bounds[i].first; j <= bounds[i].second; j++) {
+				image(j, i, 0, 0) = data[j + i * width];
+			}
+		}
+	}
+
+	void normalize() {
+		double mean = 0.0;
+		double dev = 0.0;
+		for (int i = 0; i < width; i++) {
+			for (int j = bounds[i].first; j <= bounds[i].second; j++) {
+				mean += data[j + i * width];
+			}
+		}
+		mean /= size;
+
+		double d;
+		for (int i = 0; i < width; i++) {
+			for (int j = bounds[i].first; j <= bounds[i].second; j++) {
+				d = data[j + i * width] - mean;
+				dev += d * d;
+			}
+		}
+		dev = sqrt(dev);
+
+		for (int i = 0; i < width; i++) {
+			for (int j = bounds[i].first; j <= bounds[i].second; j++) {
+				data[j + i * width] = (data[j + i * width] - mean) / dev;
+			}
+		}
+	}
+
+	double covariate(const Slab &kernel) {
+		double result = 0.0;
+		for (int i = 0; i < width; i++) {
+			for (int j = bounds[i].first; j <= bounds[j].second; j++) {
+				result += data[j + i * width] * kernel.data[j + i * width];
+			}
+		}
+		return result;
+	}
+
+	void addPixel(int x, int y, double opacity) {
+		data[y * width + x] += opacity;
+	}
+
+	void clamp() {
+		for (int i = 0; i < width; i++) {
+			for (int j = bounds[i].first; j <= bounds[i].second; j++) {
+				data[j + i * width] = std::min(data[j + i * width], 1.0);
+			}
+		}
+	}
+	
+	static int width;
+	static int size;
+	static std::vector<Point> bounds;
+	static void prepare(int imageSize) {
+		width = imageSize;
+		bounds.resize(width);
+		int r = imageSize / 2;
+		for (int i = 0; i < width; i++) {
+			int start = 0;
+			int end = 0;
+			int flag = false;
+			for (int j = 0; j < width; j++) {
+				int dx = i - r;
+				int dy = j - r;
+				if ((dx * 2 + 1) * (dx * 2 + 1) + (dy * 2 + 1) * (dy * 2 + 1) <= (r * 2 + 1) * (r * 2 + 1)) {
+					if (!flag) {
+						flag = true;
+						bounds[i].first = j;
+					}
+				} else {
+					if (flag) {
+						flag = false;
+						bounds[i].second = j - 1;
+					}
+				}
+			}
+			if (bounds[i].second == 0)
+				bounds[i].second = width - 1;
+		}
+		int l = 0;
+		for (int i = 0; i < width; i++) {
+			l += bounds[i].second - bounds[i].first;
+		}
+		size = l;
+	}
+};
+
+int Slab::width;
+int Slab::size;
+std::vector<Point> Slab::bounds;
+
 bool inCircle(int x, int y, int r) {
 	int dx = x - r;
 	int dy = y - r;
@@ -110,8 +232,9 @@ struct Genome {
 		}
 	}
 
-	void draw(Image &canvas, const std::vector<Point> &nails, const float threadOpacity, const std::vector<Point> &bounds) {
-		canvas.fill(0.0f);
+	void draw(Slab &canvas, const std::vector<Point> &nails, const float threadOpacity, const std::vector<Point> &bounds) {
+		canvas.fill(0.0);
+		double paint = threadOpacity;
 		for (int i = 0; i < dna.size() - 1; i++) {
 			int x0 = nails[dna[i]].first;
 			int x1 = nails[dna[i + 1]].first;
@@ -123,10 +246,7 @@ struct Genome {
 			int sy = (y0 < y1) ? 1 : -1;
 			int err = dx - dy;
 			while (true) {
-				float c = canvas(x0, y0, 0, 0);
-				c += threadOpacity;
-				if (c > 1.0f) c = 1.0f;
-				canvas(x0, y0, 0, 0) = c;				
+				canvas.addPixel(x0, y0, paint);			
 
 				if ((x0 == x1) && (y0 == y1)) break;
 				int e2 = 2 * err;
@@ -134,7 +254,8 @@ struct Genome {
 				if (e2 < dx) { err += dx; y0 += sy; }
 			}
 		}
-		normalizeImage(canvas);
+		canvas.clamp();
+		canvas.normalize();
 	}
 
 	// ORDER BY fitness DESC
@@ -171,7 +292,7 @@ struct Population {
 		}
 	}
 
-	double calculateFitness(const Image &kernel, Image &canvas, const std::vector<Point> &nails, const float threadOpacity, const std::vector<Point> &bounds) {
+	double calculateFitness(const Slab &kernel, Slab &canvas, const std::vector<Point> &nails, const float threadOpacity, const std::vector<Point> &bounds) {
 		double minFitness = 10e+7;
 		double maxFitness = -10e+7;
 		double average = 0.0;
@@ -179,7 +300,7 @@ struct Population {
 		for (int i = 0; i < population.size(); i++) {
 			//printf("%i\n", i);
 			population[i].draw(canvas, nails, threadOpacity, bounds);
-			double fitness = convolve(kernel, canvas);
+			double fitness = canvas.covariate(kernel);
 			population[i].fitness = fitness;
 			if (fitness > maxFitness) maxFitness = fitness;
 			if (fitness < minFitness) minFitness = fitness;
@@ -332,6 +453,7 @@ void run() {
 	double threshold = 1e-7;
 	double ringDiameter = 0;
 	double threadDiameter = 0;
+	int saveEvery = -1;
 	char filename[256] = "test-i.png";
 
 	FILE *config = NULL;
@@ -371,8 +493,7 @@ void run() {
 		}
 		if (strcmp(line, "mutation") == 0) {
 			fscanf_s(config, "%f", &mutationSpread);
-		}
-		else
+		} else
 		if (strcmp(line, "stableiterations") == 0) {
 			fscanf_s(config, "%i", &stableIterations);
 		} else
@@ -381,8 +502,7 @@ void run() {
 		} else
 		if (strcmp(line, "threshold") == 0) {
 			fscanf_s(config, "%f", &threshold);
-		}
-		else
+		} else
 		if (strcmp(line, "opacity") == 0) {
 			fscanf_s(config, "%f", &threadOpacity);
 		} else
@@ -391,6 +511,9 @@ void run() {
 		}
 		if (strcmp(line, "ring_diameter") == 0) {
 			fscanf_s(config, "%lf", &ringDiameter);
+		} else
+		if (strcmp(line, "save_every") == 0) {
+			fscanf_s(config, "%i", &saveEvery);
 		} else
 		if (strcmp(line, "thread_diameter") == 0) {
 			fscanf_s(config, "%lf", &threadDiameter);
@@ -428,10 +551,17 @@ void run() {
 	populations[0].init(populationSize, genomeSize, nails);
 	populations[1].init(populationSize, genomeSize, nails);
 
-	Image kernel = loadImage(filename, imageSize);
-	Image canvas(imageSize, imageSize, 1, 1, 0.0f);
+	Image kernelImage = loadImage(filename, imageSize);
+	Image output(imageSize, imageSize, 1, 1, 0.0f);
 
-	normalizeImage(kernel);
+	//normalizeImage(kernel);
+	Slab::prepare(imageSize);
+
+	Slab kernel;
+	kernel.fromImage(kernelImage);
+	kernel.normalize();
+
+	Slab canvas;
 
 	double fitness = 0.0;
 	double prevFitness = 1.0;
@@ -456,6 +586,19 @@ void run() {
 
 		history.push_back(fitness);
 		printf("Generation: %i,\tFitness: %.7lf,\tMax: %.7lf\tMin: %.7lf\n", generation, fitness, populations[current].population.front().fitness, populations[current].population.back().fitness);
+		if (saveEvery > 0 && generation % saveEvery == 0) {
+			printf("SAVING\n");
+			Genome *win = &(populations[generation % 2].population.front());
+			win->draw(canvas, nailPoints, threadOpacity, bounds);
+			canvas.toImage(output);
+			char fname[100];
+			sprintf_s(fname, 100, "generation-%i.bmp", generation);
+			output.normalize(0, 255);
+			output *= -1;
+			output += 255;
+			output.save(fname);
+		}
+
 
 		generateNewPopulation(populations[current], populations[next], nails, elite, mutationSpread);
 
@@ -486,13 +629,27 @@ void run() {
 
 	Genome *win = &(populations[generation % 2].population.front());
 	win->draw(canvas, nailPoints, threadOpacity, bounds);
-	canvas.normalize(0, 255);
-	canvas *= -1;
-	canvas += 255;
 
-	canvas.save("result.bmp");
+	canvas.toImage(output);
 
-	canvas.display("Winner");
+	output.normalize(0, 255);
+	output *= -1;
+	output += 255;
+
+	double length = 0.0;
+	for (int i = 0; i < win->dna.size() - 1; i++) {
+		Point p1 = nailPoints[win->dna[i]];
+		Point p2 = nailPoints[win->dna[i+1]];
+		int dx = p1.first - p2.first;
+		int dy = p1.second - p2.second;
+		length += sqrt(dx * dx + dy * dy);
+	}
+	length *= ringDiameter / imageSize;
+	printf("Length: %.2lf m\n", length / 1000.0);
+
+	output.save("result.bmp");
+
+	output.display("Winner");
 
 	//drawHistory(history);
 }
