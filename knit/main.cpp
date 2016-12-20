@@ -30,6 +30,12 @@ double normalRandom()
 	return cos(8.*atan(1.)*u2)*sqrt(-2.*log(u1));
 }
 
+struct Triple {
+	double min;
+	double max;
+	double mean;
+};
+
 struct Slab {
 	double *data;
 
@@ -217,7 +223,7 @@ struct Genome {
 
 	void mutate(double spread, int nails) {
 		for (int i = 0; i < dna.size(); i++) {
-			int offset = floor(pow(normalRandom() * spread, 2) + 0.5);
+			int offset = floor(pow(normalRandom() * spread * nails, 2) + 0.5);
 			offset += nails; // to eliminate negative offsets and %
 			dna[i] = (dna[i] + offset) % nails;
 		}
@@ -343,9 +349,9 @@ struct Population {
 	}
 };
 
-int MAX_CHUNK, MIN_CHUNK;
+double MAX_CHUNK, MIN_CHUNK;
 int getCrossoverJumpSize(int size) {
-	return floor(uniformRandom() * (MAX_CHUNK - MIN_CHUNK) + MIN_CHUNK);
+	return floor(size * ( uniformRandom() * (MAX_CHUNK - MIN_CHUNK) + MIN_CHUNK) );
 }
 
 Genome crossover(Genome *mother, Genome *father) {
@@ -442,18 +448,19 @@ void run() {
 	int elite = 0;
 	int genomeSize = nails * 4;
 	int imageSize = 100;
-	int minChunk = 10;
-	int maxChunk = 20;
+	double minChunk = 0.5;
+	double maxChunk = 0.5;
 	int iterations = 50;
 	int stableIterations = 5;
 	int iterationsToBurst = 100;
 	float threadOpacity = 1.0 / 10;
-	float mutationSpread = 1.0;
-	float burstProbability = 0.005;
+	double mutationSpread = 1.0;
+	double burstProbability = 0.005;
 	double threshold = 1e-7;
 	double ringDiameter = 0;
 	double threadDiameter = 0;
 	int saveEvery = -1;
+	int historyStep = 1;
 	char filename[256] = "test-i.png";
 
 	FILE *config = NULL;
@@ -478,11 +485,11 @@ void run() {
 			fscanf_s(config, "%i", &genomeSize);
 		} else
 		if (strcmp(line, "minchunk") == 0) {
-			fscanf_s(config, "%i", &minChunk);
+			fscanf_s(config, "%lf", &minChunk);
 			MIN_CHUNK = minChunk;
 		} else
 		if (strcmp(line, "maxChunk") == 0) {
-			fscanf_s(config, "%i", &maxChunk);
+			fscanf_s(config, "%lf", &maxChunk);
 			MAX_CHUNK = maxChunk;
 		} else
 		if (strcmp(line, "imagesize") == 0) {
@@ -492,7 +499,7 @@ void run() {
 			fscanf_s(config, "%i", &iterations);
 		}
 		if (strcmp(line, "mutation") == 0) {
-			fscanf_s(config, "%f", &mutationSpread);
+			fscanf_s(config, "%lf", &mutationSpread);
 		} else
 		if (strcmp(line, "stableiterations") == 0) {
 			fscanf_s(config, "%i", &stableIterations);
@@ -501,19 +508,22 @@ void run() {
 			fscanf_s(config, "%i", &iterationsToBurst);
 		} else
 		if (strcmp(line, "threshold") == 0) {
-			fscanf_s(config, "%f", &threshold);
+			fscanf_s(config, "%lf", &threshold);
 		} else
 		if (strcmp(line, "opacity") == 0) {
-			fscanf_s(config, "%f", &threadOpacity);
+			fscanf_s(config, "%lf", &threadOpacity);
 		} else
 		if (strcmp(line, "burst") == 0) {
-			fscanf_s(config, "%f", &burstProbability);
+			fscanf_s(config, "%lf", &burstProbability);
 		}
 		if (strcmp(line, "ring_diameter") == 0) {
 			fscanf_s(config, "%lf", &ringDiameter);
 		} else
 		if (strcmp(line, "save_every") == 0) {
 			fscanf_s(config, "%i", &saveEvery);
+		} else
+		if (strcmp(line, "history_step") == 0) {
+			fscanf_s(config, "%i", &historyStep);
 		} else
 		if (strcmp(line, "thread_diameter") == 0) {
 			fscanf_s(config, "%lf", &threadDiameter);
@@ -565,26 +575,30 @@ void run() {
 
 	double fitness = 0.0;
 	double prevFitness = 1.0;
-	double best = 1.0;
-	double prevBest = 1.0;
+	double best = -1.0;
+	double prevBest = -1.0;
 	int stableGeneration = 0;
 	int goodGeneration = 0;
 	int generation = 0;
 	bool enough = false;
-	std::vector<double> history;
+	std::vector<Triple> history;
 	history.reserve(iterations);
 	
-	while (!enough && generation < iterations) {
+	while (generation < iterations) {
 		int current = generation % 2;
 		int next = (generation + 1) % 2;
 
 		prevFitness = fitness;
 		fitness = populations[current].calculateFitness(kernel, canvas, nailPoints, threadOpacity, bounds);
 
-		prevBest = best;
+		prevBest = std::max(prevBest, best);
 		best = populations[current].population.front().fitness;
 
-		history.push_back(fitness);
+		Triple h;
+		h.max = populations[current].population.front().fitness;
+		h.min = populations[current].population.back().fitness;
+		h.mean = fitness;
+		history.push_back(h);
 		printf("Generation: %i,\tFitness: %.7lf,\tMax: %.7lf\tMin: %.7lf\n", generation, fitness, populations[current].population.front().fitness, populations[current].population.back().fitness);
 		if (saveEvery > 0 && generation % saveEvery == 0) {
 			printf("SAVING\n");
@@ -602,7 +616,7 @@ void run() {
 
 		generateNewPopulation(populations[current], populations[next], nails, elite, mutationSpread);
 
-		if (abs(1.0 - best / prevBest) < 1e-7) {
+		if (best < prevBest + 1e-10) {
 			goodGeneration++;
 		} else {
 			goodGeneration = 0;
@@ -650,6 +664,14 @@ void run() {
 	output.save("result.bmp");
 
 	output.display("Winner");
+
+	FILE *outfile;
+	fopen_s(&outfile, "history.csv", "w");
+	for (int i = 0; i < history.size(); i++) {
+		if(i % historyStep == 0)
+			fprintf_s(outfile, "%i\t%.7lf\t%.7lf\t%.7lf\n", i, history[i].min, history[i].mean, history[i].max);
+	}
+	fclose(outfile);
 
 	//drawHistory(history);
 }
