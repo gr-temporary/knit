@@ -44,8 +44,12 @@ struct Slab {
 		fill(0.0);
 	}
 
+	~Slab() {
+		delete[] data;
+	}
+
 	void fill(double v = 0.0) {
-		for (int i = 0; i < size; i++) {
+		for (int i = 0; i < width * width; i++) {
 			data[i] = v;
 		}
 	}
@@ -116,6 +120,13 @@ struct Slab {
 			}
 		}
 	}
+
+	void scan() {
+		int j = width / 2;
+		for (int i = 0; i < width; i++) {
+			printf("%i:\t%.7lf\n", i, data[i * width + j]);
+		}
+	}
 	
 	static int width;
 	static int size;
@@ -157,53 +168,6 @@ struct Slab {
 int Slab::width;
 int Slab::size;
 std::vector<Point> Slab::bounds;
-
-bool inCircle(int x, int y, int r) {
-	int dx = x - r;
-	int dy = y - r;
-	return (dx * 2 + 1) * (dx * 2 + 1) + (dy * 2 + 1) * (dy * 2 + 1) <= (r * 2 + 1) * (r * 2 + 1);
-}
-
-float normalizeImage(Image &canvas) {
-	float mean = 0.0;
-	int c = 0;
-	int r = canvas.width() / 2;
-	for (int i = 0; i < canvas.width(); i++) {
-		for (int j = 0; j < canvas.height(); j++) {
-			if (inCircle(i, j, r)) {
-				mean += canvas(i, j, 0, 0);
-				c++;
-			}
-		}
-	}
-	mean /= c;
-	float dev = 0.0;
-	for (int i = 0; i < canvas.width(); i++) {
-		for (int j = 0; j < canvas.height(); j++) {
-			if (inCircle(i, j, r)) {
-				float d = canvas(i, j, 0, 0) - mean;
-				dev += pow(d, 2);
-				canvas(i, j, 0, 0) = d;
-			}
-		}
-	}
-	dev = sqrt(dev);
-	for (int i = 0; i < canvas.width(); i++) {
-		for (int j = 0; j < canvas.height(); j++) {
-			if (inCircle(i, j, r)) {
-				canvas(i, j, 0, 0) /= dev;
-			}
-		}
-	}
-	for (int i = 0; i < canvas.width(); i++) {
-		for (int j = 0; j < canvas.height(); j++) {
-			if (!inCircle(i, j, r)) {
-				canvas(i, j, 0, 0) = 0.0;
-			}
-		}
-	}
-	return dev;
-}
 
 struct Genome {
 	DNA dna;
@@ -271,21 +235,6 @@ struct Genome {
 };
 
 typedef std::vector<Genome> Genomes;
-
-double convolve(const Image &kernel, const Image &canvas) {
-	double result = 0.0;
-	double n = 0;
-	int r = canvas.width() / 2;
-	for (int i = 0; i < canvas.width(); i++) {
-		for (int j = 0; j < canvas.height(); j++) {
-			if (inCircle(i, j, r)) {
-				result += kernel(i, j, 0, 0) * canvas(i, j, 0, 0);
-				n++;
-			}
-		}
-	}
-	return result;
-}
 
 struct Population {
 	Genomes population;
@@ -406,40 +355,10 @@ Image loadImage(char *filename, int imageSize) {
 			double c = image(i, j, 0, 0);
 			c = 1.0 - c / 255.0;
 			result(i, j, 0, 0) = c;
-
-			// can't harm
-			if (!inCircle(i, j, imageSize / 2)) {
-				result(i, j, 0, 0) = 0.0;
-			}
 		}
 	}
 
 	return result;
-}
-
-void drawHistory(std::vector<double> &history) {
-	int height = 200;
-	int width = history.size();
-	while (width > 1000) {
-		width /= 2;
-	}
-	Image img(width, height, 1, 1, 0.0);
-	std::vector<double>::iterator max = std::max_element(history.begin(), history.end());
-	std::vector<double>::iterator min = std::min_element(history.begin(), history.end());
-	double scale = *max - *min;
-	for (int i = 0; i < history.size(); i++) {
-		int h = floor(history[i] * height * 0.4);
-		if (h >= 0) {
-			for (int j = 0; j < h; j++) {
-				img(i * width / history.size(), height / 2 - j - 1, 0, 0) = 1.0;
-			}
-		} else {
-			for (int j = 0; j > h; j--) {
-				img(i * width / history.size(), height / 2 - j - 1, 0, 0) = 0.5;
-			}
-		}
-	}
-	img.display();
 }
 
 void run() {
@@ -535,7 +454,7 @@ void run() {
 	fclose(config);
 
 	if (abs(ringDiameter) > 1e-7 && abs(threadDiameter) > 1e-7) {
-		threadOpacity = ringDiameter * threadDiameter / imageSize;
+		threadOpacity = imageSize * threadDiameter / ringDiameter;
 	}
 
 	std::vector<Point> nailPoints;
