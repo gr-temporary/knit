@@ -202,7 +202,7 @@ struct Genome {
 		}
 	}
 
-	void draw(Slab &canvas, const std::vector<Point> &nails, const float threadOpacity, const std::vector<Point> &bounds) {
+	void draw(Slab &canvas, const std::vector<Point> &nails, const float threadOpacity) {
 		canvas.fill(0.0);
 		double paint = threadOpacity;
 		for (int i = 0; i < dna.size() - 1; i++) {
@@ -247,14 +247,14 @@ struct Population {
 		}
 	}
 
-	double calculateFitness(const Slab &kernel, Slab &canvas, const std::vector<Point> &nails, const float threadOpacity, const std::vector<Point> &bounds) {
+	double calculateFitness(const Slab &kernel, Slab &canvas, const std::vector<Point> &nails, const float threadOpacity) {
 		double minFitness = 10e+7;
 		double maxFitness = -10e+7;
 		double average = 0.0;
 
 		for (int i = 0; i < population.size(); i++) {
 			//printf("%i\n", i);
-			population[i].draw(canvas, nails, threadOpacity, bounds);
+			population[i].draw(canvas, nails, threadOpacity);
 			double fitness = canvas.covariate(kernel);
 			population[i].fitness = fitness;
 			if (fitness > maxFitness) maxFitness = fitness;
@@ -361,7 +361,36 @@ Image loadImage(char *filename, int imageSize) {
 	return result;
 }
 
-void run() {
+const int PROCESS_MODE = 0;
+const int DRAW_MODE = 1;
+
+void drawComplete(FILE *data, int nails, int imageSize, double opacity, const std::vector<Point> &nailPoints) {
+	int size;
+	fscanf_s(data, "%i", &size);
+
+	Genome gen;
+	gen.init(size, nails);
+
+	for (int i = 0; i < size - 1; i++) {
+		int t;
+		fscanf_s(data, "%i", &t);
+		gen.dna[i] = t;
+	}
+
+	Slab canvas;
+	gen.draw(canvas, nailPoints, opacity);
+
+	Image output(imageSize, imageSize, 1, 1, 0.0f);
+	canvas.toImage(output);
+
+	output.normalize(0, 255);
+	output *= -1;
+	output += 255;
+
+	output.display();
+}
+
+void run(char *datafile) {
 	int nails = 150;
 	int populationSize = 100;
 	int elite = 0;
@@ -382,8 +411,15 @@ void run() {
 	int historyStep = 1;
 	char filename[256] = "test-i.png";
 
+	int mode = PROCESS_MODE;
 	FILE *config = NULL;
-	fopen_s(&config, "config.txt", "r");
+	if (datafile != NULL) {
+		mode = DRAW_MODE;
+		fopen_s(&config, datafile, "r");
+	} else {
+		fopen_s(&config, "config.txt", "r");
+	}
+	
 	
 	char line[256];
 	while (fscanf_s(config, "%s", line, 256) != EOF) {
@@ -446,12 +482,17 @@ void run() {
 		} else
 		if (strcmp(line, "thread_diameter") == 0) {
 			fscanf_s(config, "%lf", &threadDiameter);
+		} else 
+		if (strcmp(line, "---") == 0) {
+			break;
 		} else {
 			
 		}
 	}
 
-	fclose(config);
+	if (mode == DRAW_MODE) {
+		imageSize = 500;
+	}
 
 	if (abs(ringDiameter) > 1e-7 && abs(threadDiameter) > 1e-7) {
 		threadOpacity = imageSize * threadDiameter / ringDiameter;
@@ -467,14 +508,16 @@ void run() {
 		nailPoints[i].first = floor(imageSize / 2 + c * r);
 		nailPoints[i].second = floor(imageSize / 2 + s * r);
 	}
-	std::vector<Point> bounds;
-	bounds.resize(imageSize);
-	for (int i = 0; i < imageSize; i++) {
-		double hw = imageSize / 2 - 0.5;
-		int off = sqrt(hw * hw - pow(i - hw, 2));
-		bounds[i].first = floor(imageSize / 2 - off);
-		bounds[i].second = floor(imageSize / 2 + off);
+
+	Slab::prepare(imageSize);
+
+	if (mode == DRAW_MODE) {
+		drawComplete(config, nails, imageSize, threadOpacity, nailPoints);
+		fclose(config);
+		return;
 	}
+
+	fclose(config);
 
 	Population populations[2];
 	populations[0].init(populationSize, genomeSize, nails);
@@ -482,9 +525,6 @@ void run() {
 
 	Image kernelImage = loadImage(filename, imageSize);
 	Image output(imageSize, imageSize, 1, 1, 0.0f);
-
-	//normalizeImage(kernel);
-	Slab::prepare(imageSize);
 
 	Slab kernel;
 	kernel.fromImage(kernelImage);
@@ -508,7 +548,7 @@ void run() {
 		int next = (generation + 1) % 2;
 
 		prevFitness = fitness;
-		fitness = populations[current].calculateFitness(kernel, canvas, nailPoints, threadOpacity, bounds);
+		fitness = populations[current].calculateFitness(kernel, canvas, nailPoints, threadOpacity);
 
 		prevBest = std::max(prevBest, best);
 		best = populations[current].population.front().fitness;
@@ -522,7 +562,7 @@ void run() {
 		if (saveEvery > 0 && generation % saveEvery == 0) {
 			printf("SAVING\n");
 			Genome *win = &(populations[generation % 2].population.front());
-			win->draw(canvas, nailPoints, threadOpacity, bounds);
+			win->draw(canvas, nailPoints, threadOpacity);
 			canvas.toImage(output);
 			char fname[100];
 			sprintf_s(fname, 100, "generation-%i.bmp", generation);
@@ -557,11 +597,11 @@ void run() {
 		}
 		generation++;
 	}
-	fitness = populations[generation % 2].calculateFitness(kernel, canvas, nailPoints, threadOpacity, bounds);
+	fitness = populations[generation % 2].calculateFitness(kernel, canvas, nailPoints, threadOpacity);
 	printf("Generation: %i,\tFitness: %lf\n", generation, fitness);
 
 	Genome *win = &(populations[generation % 2].population.front());
-	win->draw(canvas, nailPoints, threadOpacity, bounds);
+	win->draw(canvas, nailPoints, threadOpacity);
 
 	canvas.toImage(output);
 
@@ -592,6 +632,17 @@ void run() {
 	}
 	fclose(outfile);
 
+	fopen_s(&outfile, "result.txt", "w");
+	fprintf_s(outfile, "nails %i\nimagesize %i\npopulationsize %i\nelite %i\ngenomesize %i\nmutation %lf\nminchunk %i\nmaxchunk %i\niterations %i\nstableiterations %i\ngoodgenerations %i\nburst %lf\nthreshold %lf\nring_diameter %lf\nthread_diameter %lf\nsave_every %i\nhistory_step %i",
+		nails, imageSize, populationSize, elite, genomeSize, mutationSpread, minChunk, maxChunk, iterations, stableIterations, iterationsToBurst, burstProbability, threshold, ringDiameter, threadDiameter, saveEvery, historyStep);
+	fprintf_s(outfile, "\n---\n");
+	fprintf_s(outfile, "%i", genomeSize);
+	for (int i = 0; i < win->dna.size() - 1; i++) {
+		fprintf_s(outfile, " %i", win->dna[i]);
+	}
+	fprintf_s(outfile, "\n%lf meters", length / 1000.0);
+	fclose(outfile);
+
 	//drawHistory(history);
 }
 
@@ -617,7 +668,10 @@ int main(int argc, char **argv) {
 	test1 -= test2;
 	test1.display();*/
 
-	run();
+	if (argc == 1)
+		run(NULL);
+	else
+		run(argv[1]);
 
 	char c;
 	//scanf_s("%c", &c);
