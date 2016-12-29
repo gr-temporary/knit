@@ -6,6 +6,7 @@
 #include <time.h>
 #include <string.h>
 #include "CImg.h"
+#include <omp.h>
 
 using namespace cimg_library;
 
@@ -35,6 +36,63 @@ struct Triple {
 	double max;
 	double mean;
 };
+
+int cross(const Point &O, const Point &A, const Point &B) {
+	return (A.first - O.first) * (B.second - O.second) - (A.second - O.second) * (B.first - O.first);
+}
+
+bool operator <(const Point &a, const Point &b) {
+	return a.first < b.first || (a.first == b.first && a.second < b.second);
+}
+
+bool isPointInPath(int x, int y, const std::vector<Point> &path) {
+	int i = 0;
+	int j = path.size() - 1;
+	bool c = false;
+	for (i = 0; i < path.size(); i++) {
+		if ((path[i].second > y) != (path[j].second > y) && (x < (path[j].first - path[i].first) * (y - path[i].second) / (path[j].second - path[i].second) + path[i].first))
+			c = !c;
+		j = i;
+	}
+	return c;
+}
+
+void makeHull(const std::vector<Point> &nails, std::vector<Point> &bounds, int width, int height) {
+	int n = nails.size();
+	std::vector<Point> points;
+	points.assign(nails.begin(), nails.end());
+	std::sort(points.begin(), points.end());
+	std::vector<Point> H(2 * n);
+	int k = 0;
+	for (int i = 0; i < n; ++i) {
+		while (k >= 2 && cross(H[k - 2], H[k - 1], points[i]) < 0) k--;
+		H[k++] = points[i];
+	}
+
+	// Build upper hull
+	for (int i = n - 2, t = k + 1; i >= 0; i--) {
+		while (k >= t && cross(H[k - 2], H[k - 1], points[i]) < 0) k--;
+		H[k++] = points[i];
+	}
+
+	H.resize(k - 1);
+
+	bounds.resize(height);
+	for (int i = 0; i < height; i++) {
+		bool wasInside = false;
+		for (int j = 0; j < width; j++) {
+			bool isInside = isPointInPath(j, i, H);
+			if (isInside && !wasInside) {
+				bounds[i].first = j == 0 ? 0 : j - 1;
+				wasInside = true;
+			}
+			if (wasInside && !isInside) {
+				bounds[i].second = j == width - 1 ? width - 1 : j + 1;
+				wasInside = false;
+			}
+		}
+	}
+}
 
 struct Slab {
 	double *data;
@@ -66,7 +124,7 @@ struct Slab {
 
 	void toImage(Image &image) {
 		image.fill(0.0);
-		for (int i = 0; i < width; i++) {
+		for (int i = 0; i < height; i++) {
 			for (int j = bounds[i].first; j <= bounds[i].second; j++) {
 				image(j, i, 0, 0) = data[j + i * width];
 			}
@@ -76,7 +134,7 @@ struct Slab {
 	void normalize() {
 		double mean = 0.0;
 		double dev = 0.0;
-		for (int i = 0; i < width; i++) {
+		for (int i = 0; i < height; i++) {
 			for (int j = bounds[i].first; j <= bounds[i].second; j++) {
 				mean += data[j + i * width];
 			}
@@ -84,7 +142,7 @@ struct Slab {
 		mean /= size;
 
 		double d;
-		for (int i = 0; i < width; i++) {
+		for (int i = 0; i < height; i++) {
 			for (int j = bounds[i].first; j <= bounds[i].second; j++) {
 				d = data[j + i * width] - mean;
 				dev += d * d;
@@ -92,7 +150,7 @@ struct Slab {
 		}
 		dev = sqrt(dev);
 
-		for (int i = 0; i < width; i++) {
+		for (int i = 0; i < height; i++) {
 			for (int j = bounds[i].first; j <= bounds[i].second; j++) {
 				data[j + i * width] = (data[j + i * width] - mean) / dev;
 			}
@@ -101,7 +159,7 @@ struct Slab {
 
 	double covariate(const Slab &kernel) {
 		double result = 0.0;
-		for (int i = 0; i < width; i++) {
+		for (int i = 0; i < height; i++) {
 			for (int j = bounds[i].first; j <= bounds[j].second; j++) {
 				result += data[j + i * width] * kernel.data[j + i * width];
 			}
@@ -114,7 +172,7 @@ struct Slab {
 	}
 
 	void clamp() {
-		for (int i = 0; i < width; i++) {
+		for (int i = 0; i < height; i++) {
 			for (int j = bounds[i].first; j <= bounds[i].second; j++) {
 				data[j + i * width] = std::min(data[j + i * width], 1.0);
 			}
@@ -129,34 +187,14 @@ struct Slab {
 	}
 	
 	static int width;
+	static int height;
 	static int size;
 	static std::vector<Point> bounds;
-	static void prepare(int imageSize) {
-		width = imageSize;
-		bounds.resize(width);
-		int r = imageSize / 2;
-		for (int i = 0; i < width; i++) {
-			int start = 0;
-			int end = 0;
-			int flag = false;
-			for (int j = 0; j < width; j++) {
-				int dx = i - r;
-				int dy = j - r;
-				if ((dx * 2 + 1) * (dx * 2 + 1) + (dy * 2 + 1) * (dy * 2 + 1) <= (r * 2 + 1) * (r * 2 + 1)) {
-					if (!flag) {
-						flag = true;
-						bounds[i].first = j;
-					}
-				} else {
-					if (flag) {
-						flag = false;
-						bounds[i].second = j - 1;
-					}
-				}
-			}
-			if (bounds[i].second == 0)
-				bounds[i].second = width - 1;
-		}
+	static void prepare(int imageWidth, int imageHeight, const std::vector<Point> nails) {
+		width = imageWidth;
+		height = imageHeight;
+		bounds.resize(height);
+		makeHull(nails, bounds, width, height);
 		int l = 0;
 		for (int i = 0; i < width; i++) {
 			l += bounds[i].second - bounds[i].first;
@@ -166,6 +204,7 @@ struct Slab {
 };
 
 int Slab::width;
+int Slab::height;
 int Slab::size;
 std::vector<Point> Slab::bounds;
 
@@ -247,15 +286,18 @@ struct Population {
 		}
 	}
 
-	double calculateFitness(const Slab &kernel, Slab &canvas, const std::vector<Point> &nails, const float threadOpacity) {
+	double calculateFitness(const Slab &kernel, Slab* canvases, const std::vector<Point> &nails, const float threadOpacity) {
 		double minFitness = 10e+7;
 		double maxFitness = -10e+7;
 		double average = 0.0;
+		int size = population.size();
 
-		for (int i = 0; i < population.size(); i++) {
+#pragma omp for
+		for (int i = 0; i < size; i++) {
+			int this_thread = omp_get_thread_num();
 			//printf("%i\n", i);
-			population[i].draw(canvas, nails, threadOpacity);
-			double fitness = canvas.covariate(kernel);
+			population[i].draw(canvases[this_thread], nails, threadOpacity);
+			double fitness = canvases[this_thread].covariate(kernel);
 			population[i].fitness = fitness;
 			if (fitness > maxFitness) maxFitness = fitness;
 			if (fitness < minFitness) minFitness = fitness;
@@ -509,7 +551,7 @@ void run(char *datafile) {
 		nailPoints[i].second = floor(imageSize / 2 + s * r);
 	}
 
-	Slab::prepare(imageSize);
+	Slab::prepare(imageSize, imageSize, nailPoints);
 
 	if (mode == DRAW_MODE) {
 		drawComplete(config, nails, imageSize, threadOpacity, nailPoints);
@@ -532,6 +574,11 @@ void run(char *datafile) {
 
 	Slab canvas;
 
+	omp_set_num_threads(4);
+	int num_threads = omp_get_num_threads();
+	printf("THREADS: %i\n", num_threads);
+	Slab *canvases = new Slab[num_threads];
+
 	double fitness = 0.0;
 	double prevFitness = 1.0;
 	double best = -1.0;
@@ -548,7 +595,7 @@ void run(char *datafile) {
 		int next = (generation + 1) % 2;
 
 		prevFitness = fitness;
-		fitness = populations[current].calculateFitness(kernel, canvas, nailPoints, threadOpacity);
+		fitness = populations[current].calculateFitness(kernel, canvases, nailPoints, threadOpacity);
 
 		prevBest = std::max(prevBest, best);
 		best = populations[current].population.front().fitness;
@@ -571,7 +618,6 @@ void run(char *datafile) {
 			output += 255;
 			output.save(fname);
 		}
-
 
 		generateNewPopulation(populations[current], populations[next], nails, elite, mutationSpread);
 
@@ -597,7 +643,7 @@ void run(char *datafile) {
 		}
 		generation++;
 	}
-	fitness = populations[generation % 2].calculateFitness(kernel, canvas, nailPoints, threadOpacity);
+	fitness = populations[generation % 2].calculateFitness(kernel, canvases, nailPoints, threadOpacity);
 	printf("Generation: %i,\tFitness: %lf\n", generation, fitness);
 
 	Genome *win = &(populations[generation % 2].population.front());
@@ -633,7 +679,7 @@ void run(char *datafile) {
 	fclose(outfile);
 
 	fopen_s(&outfile, "result.txt", "w");
-	fprintf_s(outfile, "nails %i\nimagesize %i\npopulationsize %i\nelite %i\ngenomesize %i\nmutation %lf\nminchunk %i\nmaxchunk %i\niterations %i\nstableiterations %i\ngoodgenerations %i\nburst %lf\nthreshold %lf\nring_diameter %lf\nthread_diameter %lf\nsave_every %i\nhistory_step %i",
+	fprintf_s(outfile, "nails %i\nimagesize %i\npopulationsize %i\nelite %i\ngenomesize %i\nmutation %lf\nminchunk %lf\nmaxchunk %lf\niterations %i\nstableiterations %i\ngoodgenerations %i\nburst %lf\nthreshold %lf\nring_diameter %lf\nthread_diameter %lf\nsave_every %i\nhistory_step %i",
 		nails, imageSize, populationSize, elite, genomeSize, mutationSpread, minChunk, maxChunk, iterations, stableIterations, iterationsToBurst, burstProbability, threshold, ringDiameter, threadDiameter, saveEvery, historyStep);
 	fprintf_s(outfile, "\n---\n");
 	fprintf_s(outfile, "%i", genomeSize);
@@ -643,6 +689,7 @@ void run(char *datafile) {
 	fprintf_s(outfile, "\n%lf meters", length / 1000.0);
 	fclose(outfile);
 
+	delete[] canvases;
 	//drawHistory(history);
 }
 
@@ -651,23 +698,7 @@ int main(int argc, char **argv) {
 	/*for (int i = 0; i < 20; i++) {
 		printf("%i\n", (int)floor(normalRandom() * 2 + 0.5));
 	}*/
-
-	/*Image test1 = loadImage("stripes.png", 100);
-	Image test2(100, 100, 1, 1, 0.0);
-	for (int i = 0; i < 100 - 3; i++) {
-		for (int j = 0; j < 100; j++) {
-			test2(i, j, 0, 0) = test1(i + 3, j, 0, 0);
-		}
-	}
-	normalizeImage(test1);
-	normalizeImage(test2);
-	test1.display();
-	test2.display();
-	double r = convolve(test1, test2);
-	printf("%lf", r);
-	test1 -= test2;
-	test1.display();*/
-
+	
 	if (argc == 1)
 		run(NULL);
 	else
