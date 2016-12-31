@@ -679,8 +679,8 @@ void run(char *datafile) {
 	fclose(outfile);
 
 	fopen_s(&outfile, "result.txt", "w");
-	fprintf_s(outfile, "nails %i\nimagesize %i\npopulationsize %i\nelite %i\ngenomesize %i\nmutation %lf\nminchunk %lf\nmaxchunk %lf\niterations %i\nstableiterations %i\ngoodgenerations %i\nburst %lf\nthreshold %lf\nring_diameter %lf\nthread_diameter %lf\nsave_every %i\nhistory_step %i",
-		nails, imageSize, populationSize, elite, genomeSize, mutationSpread, minChunk, maxChunk, iterations, stableIterations, iterationsToBurst, burstProbability, threshold, ringDiameter, threadDiameter, saveEvery, historyStep);
+	fprintf_s(outfile, "file %s\nnails %i\nimagesize %i\npopulationsize %i\nelite %i\ngenomesize %i\nmutation %lf\nminchunk %lf\nmaxchunk %lf\niterations %i\nstableiterations %i\ngoodgenerations %i\nburst %lf\nthreshold %lf\nring_diameter %lf\nthread_diameter %lf\nsave_every %i\nhistory_step %i",
+		filename, nails, imageSize, populationSize, elite, genomeSize, mutationSpread, minChunk, maxChunk, iterations, stableIterations, iterationsToBurst, burstProbability, threshold, ringDiameter, threadDiameter, saveEvery, historyStep);
 	fprintf_s(outfile, "\n---\n");
 	fprintf_s(outfile, "%i", genomeSize);
 	for (int i = 0; i < win->dna.size() - 1; i++) {
