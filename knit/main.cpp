@@ -20,6 +20,10 @@ double uniformRandom()
 	return ((double)(rand()) + 1.) / ((double)(RAND_MAX)+1.);
 }
 
+double randomSign() {
+	return rand() % 2 ? 1 : -1;
+}
+
 int intRandom(int start, int end) {
 	return start + rand() % (end - start);
 }
@@ -219,15 +223,15 @@ struct Genome {
 		int maxOffset = nails * 4 / 5;
 		dna[0] = rand() % nails;
 		for (int i = 1; i < size; i++) {
-			dna[i] = (dna[i - 1] + intRandom(minOffset, maxOffset)) % nails;
+			dna[i] = rand() % nails;    //(dna[i - 1] + intRandom(minOffset, maxOffset)) % nails;
 		}
 		fitness = 0.0;
 	}
 
 	void mutate(double spread, int nails) {
 		for (int i = 0; i < dna.size(); i++) {
-			int offset = floor(pow(normalRandom() * spread * nails, 2) + 0.5);
-			offset += nails; // to eliminate negative offsets and %
+			int offset = floor(randomSign() * pow(normalRandom() * spread * nails, 2) + 0.5);
+			while(offset < 0) offset += nails; // to eliminate negative offsets and %
 			dna[i] = (dna[i] + offset) % nails;
 		}
 	}
@@ -572,6 +576,9 @@ void run(char *datafile) {
 	kernel.fromImage(kernelImage);
 	kernel.normalize();
 
+	/*kernel.toImage(kernelImage);
+	kernelImage.display();*/
+
 	Slab canvas;
 
 	omp_set_num_threads(4);
@@ -698,6 +705,12 @@ int main(int argc, char **argv) {
 	/*for (int i = 0; i < 20; i++) {
 		printf("%i\n", (int)floor(normalRandom() * 2 + 0.5));
 	}*/
+
+	for (int i = 0; i < 3000; i++) {
+		int offset = floor(randomSign() * pow(normalRandom() * 0.0013 * 200, 2) + 0.5);
+		while (offset < 0) offset += 200; // to eliminate negative offsets and %
+		printf("%i, ", offset);
+	}
 	
 	if (argc == 1)
 		run(NULL);
