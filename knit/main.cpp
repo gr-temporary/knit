@@ -7,6 +7,7 @@
 #include <string.h>
 #include "CImg.h"
 #include <omp.h>
+#include <Windows.h>
 
 using namespace cimg_library;
 
@@ -14,6 +15,9 @@ typedef int Chromosome;
 typedef std::vector<Chromosome> DNA;
 typedef std::pair<int, int> Point;
 typedef CImg<float> Image;
+typedef float DATA;
+
+const int THREADS = 4;
 
 double uniformRandom()
 {
@@ -61,9 +65,18 @@ bool isPointInPath(int x, int y, const std::vector<Point> &path) {
 	return c;
 }
 
+bool isPointInCircle(int x, int y, int r) {
+	int dx = r - x - 1;
+	int dy = r - y - 1;
+	return (dx * 2 + 1) * (dx * 2 + 1) + (dy * 2 + 1) * (dy * 2 + 1) <= (r * 2 + 1) * (r * 2 + 1);
+}
+
 void makeHull(const std::vector<Point> &nails, std::vector<Point> &bounds, int width, int height) {
+	bounds.resize(height);
 	int n = nails.size();
-	std::vector<Point> points;
+
+
+	/*std::vector<Point> points;
 	points.assign(nails.begin(), nails.end());
 	std::sort(points.begin(), points.end());
 	std::vector<Point> H(2 * n);
@@ -79,30 +92,32 @@ void makeHull(const std::vector<Point> &nails, std::vector<Point> &bounds, int w
 		H[k++] = points[i];
 	}
 
-	H.resize(k - 1);
+	H.resize(k - 1);*/
 
-	bounds.resize(height);
 	for (int i = 0; i < height; i++) {
 		bool wasInside = false;
 		for (int j = 0; j < width; j++) {
-			bool isInside = isPointInPath(j, i, H);
+			bool isInside = isPointInCircle(j, i, width / 2);
 			if (isInside && !wasInside) {
-				bounds[i].first = j == 0 ? 0 : j - 1;
+				bounds[i].first = j;// == 0 ? 0 : j - 1;
 				wasInside = true;
 			}
 			if (wasInside && !isInside) {
-				bounds[i].second = j == width - 1 ? width - 1 : j + 1;
+				bounds[i].second = j;
 				wasInside = false;
 			}
+		}
+		if (bounds[i].second == 0 && wasInside) {
+			bounds[i].second = width - 1;
 		}
 	}
 }
 
 struct Slab {
-	double *data;
+	DATA *data;
 
 	Slab() {
-		data = new double[width * width];
+		data = new DATA[width * width];
 		fill(0.0);
 	}
 
@@ -110,7 +125,7 @@ struct Slab {
 		delete[] data;
 	}
 
-	void fill(double v = 0.0) {
+	void fill(DATA v = 0.0) {
 		for (int i = 0; i < width * width; i++) {
 			data[i] = v;
 		}
@@ -136,8 +151,8 @@ struct Slab {
 	}
 
 	void normalize() {
-		double mean = 0.0;
-		double dev = 0.0;
+		DATA mean = 0.0;
+		DATA dev = 0.0;
 		for (int i = 0; i < height; i++) {
 			for (int j = bounds[i].first; j <= bounds[i].second; j++) {
 				mean += data[j + i * width];
@@ -145,7 +160,7 @@ struct Slab {
 		}
 		mean /= size;
 
-		double d;
+		DATA d;
 		for (int i = 0; i < height; i++) {
 			for (int j = bounds[i].first; j <= bounds[i].second; j++) {
 				d = data[j + i * width] - mean;
@@ -162,31 +177,31 @@ struct Slab {
 	}
 
 	double covariate(const Slab &kernel) {
-		double result = 0.0;
+		DATA result = 0.0;
 		for (int i = 0; i < height; i++) {
-			for (int j = bounds[i].first; j <= bounds[j].second; j++) {
+			for (int j = bounds[i].first; j <= bounds[i].second; j++) {
 				result += data[j + i * width] * kernel.data[j + i * width];
 			}
 		}
 		return result;
 	}
 
-	void addPixel(int x, int y, double opacity) {
+	void addPixel(int x, int y, DATA opacity) {
 		data[y * width + x] += opacity;
 	}
 
 	void clamp() {
 		for (int i = 0; i < height; i++) {
 			for (int j = bounds[i].first; j <= bounds[i].second; j++) {
-				data[j + i * width] = std::min(data[j + i * width], 1.0);
+				data[j + i * width] = std::min(data[j + i * width], (DATA)1.0);
 			}
 		}
 	}
 
 	void scan() {
-		int j = width / 2;
+		int j = height / 2;
 		for (int i = 0; i < width; i++) {
-			printf("%i:\t%.7lf\n", i, data[i * width + j]);
+			printf("%i:\t%.7lf\n", i, data[j * width + i]);
 		}
 	}
 	
@@ -230,7 +245,9 @@ struct Genome {
 
 	void mutate(double spread, int nails) {
 		for (int i = 0; i < dna.size(); i++) {
-			int offset = floor(randomSign() * pow(normalRandom() * spread * nails, 2) + 0.5);
+			int offset = floor(std::pow(normalRandom() * spread * nails, 2) + 0.5);
+			if (offset == 0) continue;
+			offset *= randomSign();
 			while(offset < 0) offset += nails; // to eliminate negative offsets and %
 			dna[i] = (dna[i] + offset) % nails;
 		}
@@ -247,17 +264,18 @@ struct Genome {
 
 	void draw(Slab &canvas, const std::vector<Point> &nails, const float threadOpacity) {
 		canvas.fill(0.0);
-		double paint = threadOpacity;
+		DATA paint = threadOpacity;
+		int x0, x1, y0, y1, dx, dy, sx, sy, err;
 		for (int i = 0; i < dna.size() - 1; i++) {
-			int x0 = nails[dna[i]].first;
-			int x1 = nails[dna[i + 1]].first;
-			int y0 = nails[dna[i]].second;
-			int y1 = nails[dna[i + 1]].second;
-			int dx = cimg::abs(x1 - x0);
-			int dy = cimg::abs(y1 - y0);
-			int sx = (x0 < x1) ? 1 : -1;
-			int sy = (y0 < y1) ? 1 : -1;
-			int err = dx - dy;
+			x0 = nails[dna[i]].first;
+			x1 = nails[dna[i + 1]].first;
+			y0 = nails[dna[i]].second;
+			y1 = nails[dna[i + 1]].second;
+			dx = cimg::abs(x1 - x0);
+			dy = cimg::abs(y1 - y0);
+			sx = (x0 < x1) ? 1 : -1;
+			sy = (y0 < y1) ? 1 : -1;
+			err = dx - dy;
 			while (true) {
 				canvas.addPixel(x0, y0, paint);			
 
@@ -296,7 +314,7 @@ struct Population {
 		double average = 0.0;
 		int size = population.size();
 
-#pragma omp for
+#pragma omp parallel for
 		for (int i = 0; i < size; i++) {
 			int this_thread = omp_get_thread_num();
 			//printf("%i\n", i);
@@ -377,7 +395,9 @@ void generateNewPopulation(Population &base, Population &result, int nails, int 
 	for (int i = 0; i < elite && i < result.population.size(); i++) {
 		result.population[i] = base.population[i];
 	}
-	for (int i = elite; i < result.population.size(); i++) {
+	int size = result.population.size();
+#pragma omp parallel for
+	for (int i = elite; i < size; i++) {
 		// select 2 parents
 		Genome* mother = base.getParentOrdinal();
 		Genome* father = base.getParentOrdinal();
@@ -412,7 +432,12 @@ const int DRAW_MODE = 1;
 
 void drawComplete(FILE *data, int nails, int imageSize, double opacity, const std::vector<Point> &nailPoints) {
 	int size;
-	fscanf_s(data, "%i", &size);
+	double threadDiameter = 0.0, ringDiameter = 0.0;
+	fscanf_s(data, "%i %lf %lf", &size, &threadDiameter, &ringDiameter);
+
+	opacity = imageSize * threadDiameter / ringDiameter;
+
+	printf("Thread opacity: %lf\n", opacity);
 
 	Genome gen;
 	gen.init(size, nails);
@@ -434,6 +459,10 @@ void drawComplete(FILE *data, int nails, int imageSize, double opacity, const st
 	output += 255;
 
 	output.display();
+}
+
+BOOL ctrlHandler(DWORD fdwCtrlType) {
+	return TRUE;
 }
 
 void run(char *datafile) {
@@ -565,6 +594,8 @@ void run(char *datafile) {
 
 	fclose(config);
 
+	//SetConsoleCtrlHandler()
+
 	Population populations[2];
 	populations[0].init(populationSize, genomeSize, nails);
 	populations[1].init(populationSize, genomeSize, nails);
@@ -581,10 +612,9 @@ void run(char *datafile) {
 
 	Slab canvas;
 
-	omp_set_num_threads(4);
-	int num_threads = omp_get_num_threads();
-	printf("THREADS: %i\n", num_threads);
-	Slab *canvases = new Slab[num_threads];
+	omp_set_dynamic(0);
+	omp_set_num_threads(THREADS);
+	Slab *canvases = new Slab[THREADS];
 
 	double fitness = 0.0;
 	double prevFitness = 1.0;
@@ -601,6 +631,8 @@ void run(char *datafile) {
 		int current = generation % 2;
 		int next = (generation + 1) % 2;
 
+		time_t start = clock();
+
 		prevFitness = fitness;
 		fitness = populations[current].calculateFitness(kernel, canvases, nailPoints, threadOpacity);
 
@@ -612,7 +644,7 @@ void run(char *datafile) {
 		h.min = populations[current].population.back().fitness;
 		h.mean = fitness;
 		history.push_back(h);
-		printf("Generation: %i,\tFitness: %.7lf,\tMax: %.7lf\tMin: %.7lf\n", generation, fitness, populations[current].population.front().fitness, populations[current].population.back().fitness);
+
 		if (saveEvery > 0 && generation % saveEvery == 0) {
 			printf("SAVING\n");
 			Genome *win = &(populations[generation % 2].population.front());
@@ -627,6 +659,9 @@ void run(char *datafile) {
 		}
 
 		generateNewPopulation(populations[current], populations[next], nails, elite, mutationSpread);
+
+		start = clock() - start;
+		printf("Generation: %i, Max: %.7lf\tMin: %.7lf, Time: %.5lf\n", generation, h.max, h.min, (double)start / CLOCKS_PER_SEC);
 
 		if (best < prevBest + 1e-10) {
 			goodGeneration++;
@@ -689,7 +724,7 @@ void run(char *datafile) {
 	fprintf_s(outfile, "file %s\nnails %i\nimagesize %i\npopulationsize %i\nelite %i\ngenomesize %i\nmutation %lf\nminchunk %lf\nmaxchunk %lf\niterations %i\nstableiterations %i\ngoodgenerations %i\nburst %lf\nthreshold %lf\nring_diameter %lf\nthread_diameter %lf\nsave_every %i\nhistory_step %i",
 		filename, nails, imageSize, populationSize, elite, genomeSize, mutationSpread, minChunk, maxChunk, iterations, stableIterations, iterationsToBurst, burstProbability, threshold, ringDiameter, threadDiameter, saveEvery, historyStep);
 	fprintf_s(outfile, "\n---\n");
-	fprintf_s(outfile, "%i", genomeSize);
+	fprintf_s(outfile, "%i %lf %lf ", genomeSize, threadDiameter, ringDiameter);
 	for (int i = 0; i < win->dna.size() - 1; i++) {
 		fprintf_s(outfile, " %i", win->dna[i]);
 	}
@@ -702,16 +737,11 @@ void run(char *datafile) {
 
 int main(int argc, char **argv) {
 	srand(clock());
+
 	/*for (int i = 0; i < 20; i++) {
 		printf("%i\n", (int)floor(normalRandom() * 2 + 0.5));
 	}*/
 
-	for (int i = 0; i < 3000; i++) {
-		int offset = floor(randomSign() * pow(normalRandom() * 0.0013 * 200, 2) + 0.5);
-		while (offset < 0) offset += 200; // to eliminate negative offsets and %
-		printf("%i, ", offset);
-	}
-	
 	if (argc == 1)
 		run(NULL);
 	else

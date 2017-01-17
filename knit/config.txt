@@ -7,22 +7,22 @@
 #file face-2.png
 #file face-3.png
 #file face-4.png
-file sh-15.jpg
+file sh-2-highcontrast.jpg
 nails 200
-imagesize 200
+imagesize 250
 populationsize 100
 elite 20
-genomesize 2000
+genomesize 2800
 mutation 0.0013
 minchunk 0.2
 maxchunk 0.3
-iterations 30000
+iterations 40000
 stableiterations 10
 goodgenerations 100
 burst 0.0003
 threshold 0.03
 #millimeters
 ring_diameter 2000
-thread_diameter 0.005
+thread_diameter 0.3
 save_every 1000
 history_step 100
