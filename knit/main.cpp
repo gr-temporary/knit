@@ -24,6 +24,11 @@ double uniformRandom()
 	return ((double)(rand()) + 1.) / ((double)(RAND_MAX)+1.);
 }
 
+double geometricRandom(double q) {
+	double x = uniformRandom();
+	return std::log(1 - x) / std::log(q);
+}
+
 double randomSign() {
 	return rand() % 2 ? 1 : -1;
 }
@@ -243,13 +248,15 @@ struct Genome {
 		fitness = 0.0;
 	}
 
-	void mutate(double spread, int nails) {
+	void mutate(double count, double spread, int nails) {
 		for (int i = 0; i < dna.size(); i++) {
-			int offset = floor(std::pow(normalRandom() * spread * nails, 2) + 0.5);
-			if (offset == 0) continue;
-			offset *= randomSign();
-			while(offset < 0) offset += nails; // to eliminate negative offsets and %
-			dna[i] = (dna[i] + offset) % nails;
+			double x = uniformRandom();
+			if (x < count) {
+				x = normalRandom();
+				int offset = floor(x * spread * nails + 0.5);
+				while (offset < 0) offset += nails; // to eliminate negative offsets and %
+				dna[i] = (dna[i] + offset) % nails;
+			}
 		}
 	}
 
@@ -391,7 +398,7 @@ Genome crossover(Genome *mother, Genome *father) {
 	return child;
 }
 
-void generateNewPopulation(Population &base, Population &result, int nails, int elite, float mutationSpread) {
+void generateNewPopulation(Population &base, Population &result, int nails, int elite, double mutationCount, double mutationSpread) {
 	for (int i = 0; i < elite && i < result.population.size(); i++) {
 		result.population[i] = base.population[i];
 	}
@@ -406,7 +413,7 @@ void generateNewPopulation(Population &base, Population &result, int nails, int 
 		result.population[i] = crossover(mother, father);
 
 		// mutate
-		result.population[i].mutate(mutationSpread, nails);
+		result.population[i].mutate(mutationCount, mutationSpread, nails);
 	}
 }
 
@@ -478,6 +485,7 @@ void run(char *datafile) {
 	int iterationsToBurst = 100;
 	float threadOpacity = 1.0 / 10;
 	double mutationSpread = 1.0;
+	double mutationCount = 1.0;
 	double burstProbability = 0.005;
 	double threshold = 1e-7;
 	double ringDiameter = 0;
@@ -531,6 +539,10 @@ void run(char *datafile) {
 		if (strcmp(line, "mutation") == 0) {
 			fscanf_s(config, "%lf", &mutationSpread);
 		} else
+		if (strcmp(line, "mutationcount") == 0) {
+			fscanf_s(config, "%lf", &mutationCount);
+		}
+		else
 		if (strcmp(line, "stableiterations") == 0) {
 			fscanf_s(config, "%i", &stableIterations);
 		} else
@@ -658,7 +670,7 @@ void run(char *datafile) {
 			output.save(fname);
 		}
 
-		generateNewPopulation(populations[current], populations[next], nails, elite, mutationSpread);
+		generateNewPopulation(populations[current], populations[next], nails, elite, mutationCount, mutationSpread);
 
 		start = clock() - start;
 		printf("Generation: %i, Max: %.7lf\tMin: %.7lf, Time: %.5lf\n", generation, h.max, h.min, (double)start / CLOCKS_PER_SEC);
@@ -721,8 +733,8 @@ void run(char *datafile) {
 	fclose(outfile);
 
 	fopen_s(&outfile, "result.txt", "w");
-	fprintf_s(outfile, "file %s\nnails %i\nimagesize %i\npopulationsize %i\nelite %i\ngenomesize %i\nmutation %lf\nminchunk %lf\nmaxchunk %lf\niterations %i\nstableiterations %i\ngoodgenerations %i\nburst %lf\nthreshold %lf\nring_diameter %lf\nthread_diameter %lf\nsave_every %i\nhistory_step %i",
-		filename, nails, imageSize, populationSize, elite, genomeSize, mutationSpread, minChunk, maxChunk, iterations, stableIterations, iterationsToBurst, burstProbability, threshold, ringDiameter, threadDiameter, saveEvery, historyStep);
+	fprintf_s(outfile, "file %s\nnails %i\nimagesize %i\npopulationsize %i\nelite %i\ngenomesize %i\nmutationcount %lf\nmutation %lf\nminchunk %lf\nmaxchunk %lf\niterations %i\nstableiterations %i\ngoodgenerations %i\nburst %lf\nthreshold %lf\nring_diameter %lf\nthread_diameter %lf\nsave_every %i\nhistory_step %i",
+		filename, nails, imageSize, populationSize, elite, genomeSize, mutationCount, mutationSpread, minChunk, maxChunk, iterations, stableIterations, iterationsToBurst, burstProbability, threshold, ringDiameter, threadDiameter, saveEvery, historyStep);
 	fprintf_s(outfile, "\n---\n");
 	fprintf_s(outfile, "%i %lf %lf ", genomeSize, threadDiameter, ringDiameter);
 	for (int i = 0; i < win->dna.size() - 1; i++) {
@@ -738,8 +750,12 @@ void run(char *datafile) {
 int main(int argc, char **argv) {
 	srand(clock());
 
-	/*for (int i = 0; i < 20; i++) {
-		printf("%i\n", (int)floor(normalRandom() * 2 + 0.5));
+	/*int vals[100];
+	for (int i = 0; i < 100; i++) vals[i] = 0;
+	int n = 1000;
+	for (int i = 0; i < n; i++) {
+		int k = floor(normalRandom() * 200 * 0.05);
+		printf("%i\n", k);
 	}*/
 
 	if (argc == 1)
@@ -748,5 +764,4 @@ int main(int argc, char **argv) {
 		run(argv[1]);
 
 	char c;
-	//scanf_s("%c", &c);
 }
