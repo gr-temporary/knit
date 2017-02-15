@@ -1,0 +1,31 @@
+#file test-i.png
+#file circle.png
+#file stripes.png
+#file dot.png
+#file half.png
+#file face.png
+#file face-2.png
+#file face-3.png
+#file face-4.png
+file sh-106.jpg
+#file sh-13.jpg
+nails 200
+#try at 250 again
+imagesize 150
+populationsize 100
+elite 20
+genomesize 2000
+mutationcount 0.001
+mutation 0.01
+minchunk 0.2
+maxchunk 0.5
+iterations 10000
+stableiterations 10
+goodgenerations 100
+burst 0.0001
+threshold 0.03
+#millimeters
+ring_diameter 2000
+thread_diameter 0.01
+save_every 1000
+history_step 100
