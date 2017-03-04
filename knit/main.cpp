@@ -491,6 +491,7 @@ void run(char *datafile) {
 	double ringDiameter = 0;
 	double threadDiameter = 0;
 	int saveEvery = -1;
+	int saveByFitness = -1;
 	int historyStep = 1;
 	char filename[256] = "test-i.png";
 
@@ -564,6 +565,10 @@ void run(char *datafile) {
 		if (strcmp(line, "save_every") == 0) {
 			fscanf_s(config, "%i", &saveEvery);
 		} else
+		if (strcmp(line, "save_by_fitness") == 0) {
+			fscanf_s(config, "%i", &saveByFitness);
+		}
+		else
 		if (strcmp(line, "history_step") == 0) {
 			fscanf_s(config, "%i", &historyStep);
 		} else
@@ -639,6 +644,8 @@ void run(char *datafile) {
 	std::vector<Triple> history;
 	history.reserve(iterations);
 	
+	int intFitness = -1;
+
 	while (generation < iterations) {
 		int current = generation % 2;
 		int next = (generation + 1) % 2;
@@ -657,18 +664,22 @@ void run(char *datafile) {
 		h.mean = fitness;
 		history.push_back(h);
 
-		if (saveEvery > 0 && generation % saveEvery == 0) {
+		int currentIntFitness = (int)floor(h.max * 100);
+
+		if ((saveEvery > 0 && generation % saveEvery == 0) || (saveByFitness > 0 && currentIntFitness > intFitness && currentIntFitness % saveByFitness == 0)) {
 			printf("SAVING\n");
 			Genome *win = &(populations[generation % 2].population.front());
 			win->draw(canvas, nailPoints, threadOpacity);
 			canvas.toImage(output);
 			char fname[100];
-			sprintf_s(fname, 100, "generation-%i.bmp", generation);
+			sprintf_s(fname, 100, "temp\\generation-%i.bmp", generation);
 			output.normalize(0, 255);
 			output *= -1;
 			output += 255;
 			output.save(fname);
 		}
+
+		intFitness = currentIntFitness;
 
 		generateNewPopulation(populations[current], populations[next], nails, elite, mutationCount, mutationSpread);
 
