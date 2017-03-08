@@ -203,6 +203,14 @@ struct Slab {
 		}
 	}
 
+	void pow(DATA power) {
+		for (int i = 0; i < height; i++) {
+			for (int j = bounds[i].first; j <= bounds[i].second; j++) {
+				data[j + i * width] = std::pow(data[j + i * width], power);
+			}
+		}
+	}
+
 	void scan() {
 		int j = height / 2;
 		for (int i = 0; i < width; i++) {
@@ -293,7 +301,6 @@ struct Genome {
 			}
 		}
 		canvas.clamp();
-		canvas.normalize();
 	}
 
 	// ORDER BY fitness DESC
@@ -326,6 +333,8 @@ struct Population {
 			int this_thread = omp_get_thread_num();
 			//printf("%i\n", i);
 			population[i].draw(canvases[this_thread], nails, threadOpacity);
+			canvases[this_thread].pow(0.75);
+			canvases[this_thread].normalize();
 			double fitness = canvases[this_thread].covariate(kernel);
 			population[i].fitness = fitness;
 			if (fitness > maxFitness) maxFitness = fitness;

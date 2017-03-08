@@ -8,14 +8,14 @@
 #file face-3.png
 #file face-4.png
 #file sh-109.jpg
-file sh-6.jpg
+file sh-117.jpg
 #file batman-3.jpg
 nails 200
 #try at 250 again
 imagesize 150
 populationsize 100
 elite 20
-genomesize 3000
+genomesize 2000
 mutationcount 0.001
 mutation 0.01
 minchunk 0.2
@@ -26,8 +26,8 @@ goodgenerations 100
 burst 0.0001
 threshold 0.03
 #millimeters
-ring_diameter 220
-thread_diameter 0.04
+ring_diameter 185
+thread_diameter 0.05
 #save_every 1000
-save_by_fitness 2
+save_by_fitness 4
 history_step 100
