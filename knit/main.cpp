@@ -333,7 +333,7 @@ struct Population {
 			int this_thread = omp_get_thread_num();
 			//printf("%i\n", i);
 			population[i].draw(canvases[this_thread], nails, threadOpacity);
-			canvases[this_thread].pow(0.75);
+			//canvases[this_thread].pow(0.75);
 			canvases[this_thread].normalize();
 			double fitness = canvases[this_thread].covariate(kernel);
 			population[i].fitness = fitness;
