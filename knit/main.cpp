@@ -644,6 +644,7 @@ void run(char *datafile) {
 
 	double fitness = 0.0;
 	double prevFitness = 1.0;
+	double avgTime = 0.0;
 	double best = -1.0;
 	double prevBest = -1.0;
 	int stableGeneration = 0;
@@ -676,7 +677,7 @@ void run(char *datafile) {
 		int currentIntFitness = (int)floor(h.max * 100);
 
 		if ((saveEvery > 0 && generation % saveEvery == 0) || (saveByFitness > 0 && currentIntFitness > intFitness && currentIntFitness % saveByFitness == 0)) {
-			printf("SAVING\n");
+			//printf("SAVING\n");
 			Genome *win = &(populations[generation % 2].population.front());
 			win->draw(canvas, nailPoints, threadOpacity);
 			canvas.toImage(output);
@@ -693,7 +694,9 @@ void run(char *datafile) {
 		generateNewPopulation(populations[current], populations[next], nails, elite, mutationCount, mutationSpread);
 
 		start = clock() - start;
-		printf("Generation: %i, Max: %.7lf\tMin: %.7lf, Time: %.5lf\n", generation, h.max, h.min, (double)start / CLOCKS_PER_SEC);
+		double seconds = ((double)start / CLOCKS_PER_SEC);
+		avgTime += (seconds - avgTime) / 100;
+		printf("G: %i (%.2lf%%), F: %.7lf, T: %.5lfs (E: %.2lfm)\r", generation, (double)generation * 100 / iterations, h.max, avgTime, (iterations - generation) * avgTime / 60);
 
 		if (best < prevBest + 1e-10) {
 			goodGeneration++;
@@ -704,7 +707,7 @@ void run(char *datafile) {
 		if (goodGeneration > iterationsToBurst) {
 			goodGeneration = 0;
 			populations[next].burst(burstProbability, nails);
-			printf("BUSRT!\n");
+			//printf("BUSRT!\n");
 		}
 
 		if (abs(1.0 - fitness / prevFitness) < threshold) {
