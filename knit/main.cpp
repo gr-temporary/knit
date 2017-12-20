@@ -645,6 +645,10 @@ void run(char *datafile) {
 	double fitness = 0.0;
 	double prevFitness = 1.0;
 	double avgTime = 0.0;
+	const int timeDepth = 50;
+	std::vector<double> timeSeries;
+	timeSeries.resize(timeDepth);
+
 	double best = -1.0;
 	double prevBest = -1.0;
 	int stableGeneration = 0;
@@ -695,7 +699,19 @@ void run(char *datafile) {
 
 		start = clock() - start;
 		double seconds = ((double)start / CLOCKS_PER_SEC);
-		avgTime += (seconds - avgTime) / 100;
+
+		if (generation == 0) {
+			for (int i = 0; i < timeSeries.size(); i++) {
+				timeSeries[i] = seconds;
+			}
+		}
+
+		timeSeries[generation % timeDepth] = seconds;
+		avgTime = 0;
+		for (int i = 0; i < timeSeries.size(); i++) {
+			avgTime += timeSeries[i];
+		}
+		avgTime /= timeSeries.size();
 		printf("G: %i (%.2lf%%), F: %.7lf, T: %.5lfs (E: %.2lfm)\r", generation, (double)generation * 100 / iterations, h.max, avgTime, (iterations - generation) * avgTime / 60);
 
 		if (best < prevBest + 1e-10) {

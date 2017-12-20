@@ -7,27 +7,27 @@
 #file face-2.png
 #file face-3.png
 #file face-4.png
-#file sh-109.jpg
-file sh-117.jpg
-#file batman-3.jpg
+file sh-101.jpg
+#file bear-2.jpg
+#file lenin.jpg
 nails 200
 #try at 250 again
-imagesize 150
-populationsize 100
+imagesize 250
+populationsize 200
 elite 20
 genomesize 2000
-mutationcount 0.001
-mutation 0.01
+mutationcount 0.0015
+mutation 0.009
 minchunk 0.2
 maxchunk 0.5
-iterations 10000
+iterations 18000
 stableiterations 10
 goodgenerations 100
 burst 0.0001
 threshold 0.03
 #millimeters
 ring_diameter 185
-thread_diameter 0.05
+thread_diameter 0.1
 #save_every 1000
 save_by_fitness 4
 history_step 100
